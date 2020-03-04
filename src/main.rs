@@ -6,6 +6,7 @@ pub struct Term {
     doc_id: i32,
     postings: Vec<i32>,
 }
+
 impl Term {
     fn new(postings: Vec<i32>) -> Self {
         Self {
