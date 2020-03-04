@@ -47,10 +47,6 @@ impl Query for Term {
         return self.doc_id;
     }
 
-    fn cost(&self) -> usize {
-        return self.postings.len();
-    }
-
     fn next(&mut self) -> i32 {
         if self.doc_id != NOT_READY {
             self.cursor += 1;
@@ -122,14 +118,6 @@ impl Query for And {
         return self.next_anded_doc(t);
     }
 
-    fn cost(&self) -> usize {
-        let mut cost: usize = 0;
-        for q in &self.queries {
-            cost += q.cost()
-        }
-        return cost;
-    }
-
     fn doc_id(&self) -> i32 {
         return self.doc_id;
     }
@@ -198,14 +186,6 @@ impl Query for Or {
         return self.doc_id;
     }
 
-    fn cost(&self) -> usize {
-        let mut cost: usize = 0;
-        for q in &self.queries {
-            cost += q.cost()
-        }
-        return cost;
-    }
-
     fn doc_id(&self) -> i32 {
         return self.doc_id;
     }
@@ -226,7 +206,6 @@ pub trait Query {
     fn next(&mut self) -> i32;
     fn doc_id(&self) -> i32;
     fn score(&self) -> f32;
-    fn cost(&self) -> usize;
 }
 
 #[cfg(test)]
