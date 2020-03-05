@@ -12,15 +12,15 @@ pub fn compute_idf(n: usize, d: usize) -> f32 {
     return x.ln_1p();
 }
 
-pub struct Term {
+pub struct Term<'a> {
     cursor: usize,
     idf: f32,
     doc_id: i32,
-    postings: Vec<i32>,
+    postings: &'a [i32],
 }
 
-impl Term {
-    fn new(n_docs_in_index: usize, postings: Vec<i32>) -> Self {
+impl<'a> Term<'a> {
+    pub fn new(n_docs_in_index: usize, postings: &'a [i32]) -> Self {
         let d = postings.len();
         Self {
             postings: postings,
@@ -31,7 +31,7 @@ impl Term {
     }
 }
 
-impl Query for Term {
+impl<'a> Query for Term<'a> {
     fn advance(&mut self, target: i32) -> i32 {
         let mut start = self.cursor;
         let mut end = self.postings.len();
@@ -84,13 +84,13 @@ impl Query for Term {
     }
 }
 
-pub struct And {
+pub struct And<'a> {
     doc_id: i32,
-    queries: Vec<Box<dyn Query>>,
+    queries: &'a mut [&'a mut dyn Query],
 }
 
-impl And {
-    fn new(queries: Vec<Box<dyn Query>>) -> Self {
+impl<'a> And<'a> {
+    fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
         Self {
             doc_id: NOT_READY,
             queries: queries,
@@ -116,7 +116,7 @@ impl And {
     }
 }
 
-impl Query for And {
+impl<'a> Query for And<'a> {
     fn advance(&mut self, target: i32) -> i32 {
         if self.queries.len() == 0 {
             return NO_MORE;
@@ -138,23 +138,26 @@ impl Query for And {
     }
 
     fn score(&self) -> f32 {
-        let mut score: f32 = 0.0;
-        for q in &self.queries {
-            if q.doc_id() == self.doc_id {
-                score += q.score()
-            }
-        }
-        return score;
+        self.queries
+            .iter()
+            .filter_map(|q| {
+                if q.doc_id() == self.doc_id {
+                    Some(q.score())
+                } else {
+                    None
+                }
+            })
+            .sum()
     }
 }
 
-pub struct Or {
+pub struct Or<'a> {
     doc_id: i32,
-    queries: Vec<Box<dyn Query>>,
+    queries: &'a mut [&'a mut dyn Query],
 }
 
-impl Or {
-    fn new(queries: Vec<Box<dyn Query>>) -> Self {
+impl<'a> Or<'a> {
+    fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
         Self {
             doc_id: NOT_READY,
             queries: queries,
@@ -162,7 +165,7 @@ impl Or {
     }
 }
 
-impl Query for Or {
+impl<'a> Query for Or<'a> {
     fn advance(&mut self, target: i32) -> i32 {
         let mut new_doc_id: i32 = NO_MORE;
         let mut i: usize = 0;
@@ -206,13 +209,16 @@ impl Query for Or {
     }
 
     fn score(&self) -> f32 {
-        let mut score: f32 = 0.0;
-        for q in &self.queries {
-            if q.doc_id() == self.doc_id {
-                score += q.score()
-            }
-        }
-        return score;
+        self.queries
+            .iter()
+            .map(|q| {
+                if q.doc_id() == self.doc_id {
+                    q.score()
+                } else {
+                    0.0
+                }
+            })
+            .sum()
     }
 }
 
@@ -227,9 +233,10 @@ pub trait Query {
 mod tests {
     use super::*;
     use std::*;
+
     #[test]
     fn test_term_next() {
-        let mut t = Term::new(1, [1, 2, 3].to_vec());
+        let mut t = Term::new(1, &[1, 2, 3]);
         assert_eq!(t.next(), 1);
         assert_eq!(t.next(), 2);
         assert_eq!(t.next(), 3);
@@ -238,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_term_advance() {
-        let mut t = Term::new(1, [1, 2, 3, 5].to_vec());
+        let mut t = Term::new(1, &[1, 2, 3, 5]);
         assert_eq!(t.advance(1), 1);
         assert_eq!(t.advance(4), 5);
         assert_eq!(t.advance(5), 5);
@@ -247,10 +254,11 @@ mod tests {
 
     #[test]
     fn test_and_advance() {
-        let mut and = And::new(vec![
-            Box::new(Term::new(1, [1, 2, 3, 5, 6].to_vec())),
-            Box::new(Term::new(1, [1, 2, 4, 5, 6].to_vec())),
-        ]);
+        let queries: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 3, 5, 6]),
+            &mut Term::new(1, &[1, 2, 4, 5, 6]),
+        ];
+        let mut and = And::new(queries);
         assert_eq!(and.advance(4), 5);
         assert_eq!(and.next(), 6);
         assert_eq!(and.next(), NO_MORE);
@@ -258,12 +266,13 @@ mod tests {
 
     #[test]
     fn test_and_next() {
-        let mut and = And::new(vec![
-            Box::new(Term::new(1, [1, 2, 3].to_vec())),
-            Box::new(Term::new(1, [1, 2, 4, 5].to_vec())),
-            Box::new(Term::new(1, [1, 2, 3].to_vec())),
-            Box::new(Term::new(1, [1, 2, 7].to_vec())),
-        ]);
+        let queries: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 3]),
+            &mut Term::new(1, &[1, 2, 4, 5]),
+            &mut Term::new(1, &[1, 2, 3]),
+            &mut Term::new(1, &[1, 2, 7]),
+        ];
+        let mut and = And::new(queries);
         assert_eq!(and.next(), 1);
         assert_eq!(and.next(), 2);
         assert_eq!(and.next(), NO_MORE);
@@ -271,17 +280,18 @@ mod tests {
 
     #[test]
     fn test_and_empty() {
-        let mut and = Or::new(vec![]);
+        let mut and = Or::new(&mut []);
         assert_eq!(and.next(), NO_MORE);
         assert_eq!(and.advance(1), NO_MORE);
     }
 
     #[test]
     fn test_or_next() {
-        let mut or = Or::new(vec![
-            Box::new(Term::new(1, [1, 2, 3].to_vec())),
-            Box::new(Term::new(1, [1, 2, 4, 5].to_vec())),
-        ]);
+        let queries: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 3]),
+            &mut Term::new(1, &[1, 2, 4, 5]),
+        ];
+        let mut or = Or::new(queries);
         assert_eq!(or.next(), 1);
         assert_eq!(or.score(), compute_idf(1, 3) + compute_idf(1, 4));
 
@@ -300,10 +310,11 @@ mod tests {
 
     #[test]
     fn test_or_advance() {
-        let mut or = Or::new(vec![
-            Box::new(Term::new(1, [1, 2, 3].to_vec())),
-            Box::new(Term::new(1, [1, 2, 4, 5].to_vec())),
-        ]);
+        let queries: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 3]),
+            &mut Term::new(1, &[1, 2, 4, 5]),
+        ];
+        let mut or = Or::new(queries);
         assert_eq!(or.advance(4), 4);
         assert_eq!(or.next(), 5);
         assert_eq!(or.next(), NO_MORE);
@@ -311,23 +322,23 @@ mod tests {
 
     #[test]
     fn test_or_empty() {
-        let mut or = Or::new(vec![]);
+        let mut or = Or::new(&mut []);
         assert_eq!(or.next(), NO_MORE);
         assert_eq!(or.advance(1), NO_MORE);
     }
 
     #[test]
     fn test_or_complex() {
-        let or = Or::new(vec![
-            Box::new(Term::new(1, [1, 2, 3].to_vec())),
-            Box::new(Term::new(1, [1, 7, 9].to_vec())),
-        ]);
+        let queries: &mut [&mut dyn Query] =
+            &mut [&mut Term::new(1, &[1, 2, 3]), &mut Term::new(1, &[1, 7, 9])];
+        let mut or = Or::new(queries);
 
-        let mut and = And::new(vec![
-            Box::new(Term::new(1, [1, 2, 7].to_vec())),
-            Box::new(Term::new(1, [1, 2, 4, 5, 7, 9].to_vec())),
-            Box::new(or),
-        ]);
+        let queries: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 7]),
+            &mut Term::new(1, &[1, 2, 4, 5, 7, 9]),
+            &mut or,
+        ];
+        let mut and = And::new(queries);
 
         assert_eq!(and.next(), 1);
         assert!(nearly_equal(
@@ -344,6 +355,24 @@ mod tests {
         assert_eq!(and.next(), NO_MORE);
     }
 
+    #[test]
+    fn test_example() {
+        let queries: &mut [&mut dyn Query] =
+            &mut [&mut Term::new(1, &[1, 2, 3]), &mut Term::new(1, &[1, 7, 9])];
+        let mut or = Or::new(queries);
+
+        let queries: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 7]),
+            &mut Term::new(1, &[1, 2, 4, 5, 7, 9]),
+            &mut or,
+        ];
+        let mut and = And::new(queries);
+
+        while and.next() != NO_MORE {
+            println!("doc: {}, score: {}", and.doc_id(), and.score());
+        }
+    }
+
     pub fn nearly_equal(a: f32, b: f32) -> bool {
         let abs_a = a.abs();
         let abs_b = b.abs();
@@ -358,23 +387,6 @@ mod tests {
         } else {
             // Use relative error.
             (diff / f32::min(abs_a + abs_b, f32::MAX)) < f32::EPSILON
-        }
-    }
-    #[test]
-    fn test_example() {
-        let or = Or::new(vec![
-            Box::new(Term::new(1, [1, 2, 3].to_vec())),
-            Box::new(Term::new(1, [1, 7, 9].to_vec())),
-        ]);
-
-        let mut and = And::new(vec![
-            Box::new(Term::new(1, [1, 2, 7].to_vec())),
-            Box::new(Term::new(1, [1, 2, 4, 5, 7, 9].to_vec())),
-            Box::new(or),
-        ]);
-
-        while and.next() != NO_MORE {
-            println!("doc: {}, score: {}", and.doc_id(), and.score());
         }
     }
 }
