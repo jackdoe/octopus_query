@@ -330,13 +330,10 @@ mod tests {
         ]);
 
         assert_eq!(and.next(), 1);
-        assert_eq!(
-            nearly_equal(
-                and.score(),
-                compute_idf(1, 3) + compute_idf(1, 3) + compute_idf(1, 3) + compute_idf(1, 6)
-            ),
-            true
-        );
+        assert!(nearly_equal(
+            and.score(),
+            compute_idf(1, 3) + compute_idf(1, 3) + compute_idf(1, 3) + compute_idf(1, 6)
+        ));
 
         assert_eq!(and.next(), 2);
         assert_eq!(and.score(), 0.72951484);
