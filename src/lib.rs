@@ -90,7 +90,7 @@ pub struct And<'a> {
 }
 
 impl<'a> And<'a> {
-    fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
+    pub fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
         Self {
             doc_id: NOT_READY,
             queries: queries,
@@ -157,7 +157,7 @@ pub struct Or<'a> {
 }
 
 impl<'a> Or<'a> {
-    fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
+    pub fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
         Self {
             doc_id: NOT_READY,
             queries: queries,
