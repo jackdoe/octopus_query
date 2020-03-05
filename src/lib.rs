@@ -222,6 +222,114 @@ impl<'a> Query for Or<'a> {
     }
 }
 
+pub struct DisMax<'a> {
+    doc_id: i32,
+    tiebreaker: f32,
+    queries: &'a mut [&'a mut dyn Query],
+}
+
+impl<'a> DisMax<'a> {
+    pub fn new(tiebreaker: f32, queries: &'a mut [&'a mut dyn Query]) -> Self {
+        Self {
+            doc_id: NOT_READY,
+            tiebreaker: tiebreaker,
+            queries: queries,
+        }
+    }
+}
+
+impl<'a> Query for DisMax<'a> {
+    fn advance(&mut self, target: i32) -> i32 {
+        let mut new_doc_id: i32 = NO_MORE;
+        let mut i: usize = 0;
+        while i < self.queries.len() {
+            let q = &mut self.queries[i];
+            let mut cur_doc_id = q.doc_id();
+            if cur_doc_id < target {
+                cur_doc_id = q.advance(target)
+            }
+
+            if cur_doc_id < new_doc_id {
+                new_doc_id = cur_doc_id
+            }
+            i += 1;
+        }
+        self.doc_id = new_doc_id;
+        return self.doc_id;
+    }
+
+    fn next(&mut self) -> i32 {
+        let mut new_doc_id: i32 = NO_MORE;
+        let mut i: usize = 0;
+        while i < self.queries.len() {
+            let q = &mut self.queries[i];
+            let mut cur_doc_id = q.doc_id();
+            if cur_doc_id == self.doc_id {
+                cur_doc_id = q.next()
+            }
+
+            if cur_doc_id < new_doc_id {
+                new_doc_id = cur_doc_id
+            }
+            i += 1;
+        }
+        self.doc_id = new_doc_id;
+        return self.doc_id;
+    }
+
+    fn doc_id(&self) -> i32 {
+        return self.doc_id;
+    }
+
+    fn score(&self) -> f32 {
+        let mut sum: f32 = 0.0;
+        let mut max: f32 = 0.0;
+        for q in self.queries.iter() {
+            if q.doc_id() == self.doc_id {
+                let score = q.score();
+                if score > max {
+                    max = score
+                }
+                sum += score;
+            }
+        }
+
+        max + (sum - max) * self.tiebreaker
+    }
+}
+
+pub struct Constant<'a> {
+    boost: f32,
+    query: &'a mut dyn Query,
+}
+
+impl<'a> Constant<'a> {
+    pub fn new(boost: f32, query: &'a mut dyn Query) -> Self {
+        Self {
+            boost: boost,
+            query: query,
+        }
+    }
+}
+
+impl<'a> Query for Constant<'a> {
+    fn advance(&mut self, target: i32) -> i32 {
+        return self.query.advance(target);
+    }
+
+    fn next(&mut self) -> i32 {
+        return self.query.next();
+    }
+
+    fn doc_id(&self) -> i32 {
+        return self.query.doc_id();
+    }
+
+    fn score(&self) -> f32 {
+        return self.boost;
+    }
+}
+
 pub trait Query {
     fn advance(&mut self, target: i32) -> i32;
     fn next(&mut self) -> i32;
@@ -388,5 +496,51 @@ mod tests {
             // Use relative error.
             (diff / f32::min(abs_a + abs_b, f32::MAX)) < f32::EPSILON
         }
+    }
+
+    #[test]
+    fn test_constant_next() {
+        let queries: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 3]),
+            &mut Term::new(1, &[1, 2, 4, 5]),
+        ];
+        let or: &mut dyn Query = &mut Or::new(queries);
+        let mut c = Constant::new(1.3, or);
+        assert_eq!(c.next(), 1);
+        assert_eq!(c.score(), 1.3);
+
+        assert_eq!(c.next(), 2);
+        assert_eq!(c.score(), 1.3);
+
+        assert_eq!(c.next(), 3);
+        assert_eq!(c.score(), 1.3);
+
+        assert_eq!(c.next(), 4);
+        assert_eq!(c.score(), 1.3);
+
+        assert_eq!(c.next(), 5);
+        assert_eq!(c.next(), NO_MORE);
+    }
+
+    #[test]
+    fn test_dismax_next() {
+        let queries_a: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 3]),
+            &mut Term::new(1, &[1, 2, 4, 5]),
+        ];
+        let queries_b: &mut [&mut dyn Query] = &mut [
+            &mut Term::new(1, &[1, 2, 3]),
+            &mut Term::new(1, &[1, 2, 4, 5]),
+        ];
+
+        let or_a: &mut dyn Query = &mut Or::new(queries_a);
+        let or_b: &mut dyn Query = &mut Or::new(queries_b);
+        let mut ca = Constant::new(1.3, or_a);
+        let mut cb = Constant::new(1.3, or_b);
+
+        let queries: &mut [&mut dyn Query] = &mut [&mut ca, &mut cb];
+        let mut dm = DisMax::new(0.1, queries);
+        assert_eq!(dm.next(), 1);
+        assert_eq!(dm.score(), 1.43);
     }
 }
