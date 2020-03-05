@@ -1,18 +1,32 @@
 const NO_MORE: i32 = std::i32::MAX;
 const NOT_READY: i32 = -1;
 
+pub fn compute_idf(n: usize, d: usize) -> f32 {
+    // idf is log(1 + N/D)
+    // N = total documents in the index
+    // d = documents matching (len(postings))
+
+    let nf = n as f32;
+    let df = d as f32;
+    let x = nf / df;
+    return x.ln_1p();
+}
+
 pub struct Term {
     cursor: usize,
+    idf: f32,
     doc_id: i32,
     postings: Vec<i32>,
 }
 
 impl Term {
-    fn new(postings: Vec<i32>) -> Self {
+    fn new(n_docs_in_index: usize, postings: Vec<i32>) -> Self {
+        let d = postings.len();
         Self {
             postings: postings,
             doc_id: NOT_READY,
             cursor: 0,
+            idf: compute_idf(n_docs_in_index, d),
         }
     }
 }
@@ -66,7 +80,7 @@ impl Query for Term {
     }
 
     fn score(&self) -> f32 {
-        return 1.0;
+        return self.idf;
     }
 }
 
@@ -212,10 +226,10 @@ pub trait Query {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::*;
     #[test]
     fn test_term_next() {
-        let mut t = Term::new([1, 2, 3].to_vec());
+        let mut t = Term::new(1, [1, 2, 3].to_vec());
         assert_eq!(t.next(), 1);
         assert_eq!(t.next(), 2);
         assert_eq!(t.next(), 3);
@@ -224,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_term_advance() {
-        let mut t = Term::new([1, 2, 3, 5].to_vec());
+        let mut t = Term::new(1, [1, 2, 3, 5].to_vec());
         assert_eq!(t.advance(1), 1);
         assert_eq!(t.advance(4), 5);
         assert_eq!(t.advance(5), 5);
@@ -234,8 +248,8 @@ mod tests {
     #[test]
     fn test_and_advance() {
         let mut and = And::new(vec![
-            Box::new(Term::new([1, 2, 3, 5, 6].to_vec())),
-            Box::new(Term::new([1, 2, 4, 5, 6].to_vec())),
+            Box::new(Term::new(1, [1, 2, 3, 5, 6].to_vec())),
+            Box::new(Term::new(1, [1, 2, 4, 5, 6].to_vec())),
         ]);
         assert_eq!(and.advance(4), 5);
         assert_eq!(and.next(), 6);
@@ -245,10 +259,10 @@ mod tests {
     #[test]
     fn test_and_next() {
         let mut and = And::new(vec![
-            Box::new(Term::new([1, 2, 3].to_vec())),
-            Box::new(Term::new([1, 2, 4, 5].to_vec())),
-            Box::new(Term::new([1, 2, 3].to_vec())),
-            Box::new(Term::new([1, 2, 7].to_vec())),
+            Box::new(Term::new(1, [1, 2, 3].to_vec())),
+            Box::new(Term::new(1, [1, 2, 4, 5].to_vec())),
+            Box::new(Term::new(1, [1, 2, 3].to_vec())),
+            Box::new(Term::new(1, [1, 2, 7].to_vec())),
         ]);
         assert_eq!(and.next(), 1);
         assert_eq!(and.next(), 2);
@@ -265,19 +279,21 @@ mod tests {
     #[test]
     fn test_or_next() {
         let mut or = Or::new(vec![
-            Box::new(Term::new([1, 2, 3].to_vec())),
-            Box::new(Term::new([1, 2, 4, 5].to_vec())),
+            Box::new(Term::new(1, [1, 2, 3].to_vec())),
+            Box::new(Term::new(1, [1, 2, 4, 5].to_vec())),
         ]);
         assert_eq!(or.next(), 1);
-        assert_eq!(or.score(), 2.0);
+        assert_eq!(or.score(), compute_idf(1, 3) + compute_idf(1, 4));
 
         assert_eq!(or.next(), 2);
-        assert_eq!(or.score(), 2.0);
+        assert_eq!(or.score(), compute_idf(1, 3) + compute_idf(1, 4));
 
         assert_eq!(or.next(), 3);
-        assert_eq!(or.score(), 1.0);
+        assert_eq!(or.score(), compute_idf(1, 3));
 
         assert_eq!(or.next(), 4);
+        assert_eq!(or.score(), compute_idf(1, 4));
+
         assert_eq!(or.next(), 5);
         assert_eq!(or.next(), NO_MORE);
     }
@@ -285,8 +301,8 @@ mod tests {
     #[test]
     fn test_or_advance() {
         let mut or = Or::new(vec![
-            Box::new(Term::new([1, 2, 3].to_vec())),
-            Box::new(Term::new([1, 2, 4, 5].to_vec())),
+            Box::new(Term::new(1, [1, 2, 3].to_vec())),
+            Box::new(Term::new(1, [1, 2, 4, 5].to_vec())),
         ]);
         assert_eq!(or.advance(4), 4);
         assert_eq!(or.next(), 5);
@@ -303,38 +319,60 @@ mod tests {
     #[test]
     fn test_or_complex() {
         let or = Or::new(vec![
-            Box::new(Term::new([1, 2, 3].to_vec())),
-            Box::new(Term::new([1, 7, 9].to_vec())),
+            Box::new(Term::new(1, [1, 2, 3].to_vec())),
+            Box::new(Term::new(1, [1, 7, 9].to_vec())),
         ]);
 
         let mut and = And::new(vec![
-            Box::new(Term::new([1, 2, 7].to_vec())),
-            Box::new(Term::new([1, 2, 4, 5, 7, 9].to_vec())),
+            Box::new(Term::new(1, [1, 2, 7].to_vec())),
+            Box::new(Term::new(1, [1, 2, 4, 5, 7, 9].to_vec())),
             Box::new(or),
         ]);
 
         assert_eq!(and.next(), 1);
-        assert_eq!(and.score(), 4.0);
+        assert_eq!(
+            nearly_equal(
+                and.score(),
+                compute_idf(1, 3) + compute_idf(1, 3) + compute_idf(1, 3) + compute_idf(1, 6)
+            ),
+            true
+        );
 
         assert_eq!(and.next(), 2);
-        assert_eq!(and.score(), 3.0);
+        assert_eq!(and.score(), 0.72951484);
 
         assert_eq!(and.next(), 7);
-        assert_eq!(and.score(), 3.0);
+        assert_eq!(and.score(), 0.72951484);
 
         assert_eq!(and.next(), NO_MORE);
     }
 
+    pub fn nearly_equal(a: f32, b: f32) -> bool {
+        let abs_a = a.abs();
+        let abs_b = b.abs();
+        let diff = (a - b).abs();
+
+        if a == b {
+            // Handle infinities.
+            true
+        } else if a == 0.0 || b == 0.0 || diff < f32::MIN_POSITIVE {
+            // One of a or b is zero (or both are extremely close to it,) use absolute error.
+            diff < (f32::EPSILON * f32::MIN_POSITIVE)
+        } else {
+            // Use relative error.
+            (diff / f32::min(abs_a + abs_b, f32::MAX)) < f32::EPSILON
+        }
+    }
     #[test]
     fn test_example() {
         let or = Or::new(vec![
-            Box::new(Term::new([1, 2, 3].to_vec())),
-            Box::new(Term::new([1, 7, 9].to_vec())),
+            Box::new(Term::new(1, [1, 2, 3].to_vec())),
+            Box::new(Term::new(1, [1, 7, 9].to_vec())),
         ]);
 
         let mut and = And::new(vec![
-            Box::new(Term::new([1, 2, 7].to_vec())),
-            Box::new(Term::new([1, 2, 4, 5, 7, 9].to_vec())),
+            Box::new(Term::new(1, [1, 2, 7].to_vec())),
+            Box::new(Term::new(1, [1, 2, 4, 5, 7, 9].to_vec())),
             Box::new(or),
         ]);
 
