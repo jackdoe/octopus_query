@@ -1,17 +1,19 @@
 const NO_MORE: i32 = std::i32::MAX;
 const NOT_READY: i32 = -1;
 
+/// idf is log(1 + N/D)
+/// ```
+/// N = total documents in the index
+/// d = documents matching (len(postings))
+/// https://en.wikipedia.org/wiki/tf-idf
+/// ```
 pub fn compute_idf(n: usize, d: usize) -> f32 {
-    // idf is log(1 + N/D)
-    // N = total documents in the index
-    // d = documents matching (len(postings))
-
     let nf = n as f32;
     let df = d as f32;
     let x = nf / df;
     return x.ln_1p();
 }
-
+/// Basic term query
 pub struct Term<'a> {
     cursor: usize,
     idf: f32,
@@ -20,6 +22,12 @@ pub struct Term<'a> {
 }
 
 impl<'a> Term<'a> {
+    /// Create Term query
+    ///
+    /// Arguments
+    ///
+    /// * `n_docs_in_index` - Total documents in your index, in order to compute idf, pass 1 if you dont care
+    /// * `postings` - sorted array of integer document ids
     pub fn new(n_docs_in_index: usize, postings: &'a [i32]) -> Self {
         let d = postings.len();
         Self {
@@ -83,13 +91,18 @@ impl<'a> Query for Term<'a> {
         return self.idf;
     }
 }
-
+/// BooleanAnd query
 pub struct And<'a> {
     doc_id: i32,
     queries: &'a mut [&'a mut dyn Query],
 }
 
 impl<'a> And<'a> {
+    /// Create BooleanAnd query
+    ///
+    /// Arguments
+    ///
+    /// * `queries` - subqueries (same as lucene's Boolean MUST clause)
     pub fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
         Self {
             doc_id: NOT_READY,
@@ -151,12 +164,18 @@ impl<'a> Query for And<'a> {
     }
 }
 
+/// BooleanOr query
 pub struct Or<'a> {
     doc_id: i32,
     queries: &'a mut [&'a mut dyn Query],
 }
 
 impl<'a> Or<'a> {
+    /// Create BooleanOr query
+    ///
+    /// Arguments
+    ///
+    /// * `queries` - subqueries (same as lucene's Boolean Should clause)
     pub fn new(queries: &'a mut [&'a mut dyn Query]) -> Self {
         Self {
             doc_id: NOT_READY,
@@ -222,6 +241,7 @@ impl<'a> Query for Or<'a> {
     }
 }
 
+/// DisMax query
 pub struct DisMax<'a> {
     doc_id: i32,
     tiebreaker: f32,
@@ -229,6 +249,13 @@ pub struct DisMax<'a> {
 }
 
 impl<'a> DisMax<'a> {
+    /// Create DisMax query
+    /// picks the max score, and then it adds tiebreaker * score for the other matching queries
+    ///
+    /// Arguments
+    ///
+    /// * `tiebreaker` - the tiebreaker factor
+    /// * `queries` - subqueries
     pub fn new(tiebreaker: f32, queries: &'a mut [&'a mut dyn Query]) -> Self {
         Self {
             doc_id: NOT_READY,
@@ -298,12 +325,21 @@ impl<'a> Query for DisMax<'a> {
     }
 }
 
+/// Constant Score query
 pub struct Constant<'a> {
     boost: f32,
     query: &'a mut dyn Query,
 }
 
 impl<'a> Constant<'a> {
+    /// Create Constant Score query
+    ///
+    /// ignores the subquery score and returns `boost` score
+    ///
+    /// Arguments
+    ///
+    /// * `boost` - the score being returned
+    /// * `query` - the sub query
     pub fn new(boost: f32, query: &'a mut dyn Query) -> Self {
         Self {
             boost: boost,
