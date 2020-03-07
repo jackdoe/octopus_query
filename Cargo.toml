@@ -1,10 +1,11 @@
 [package]
-name = "octopus"
+name = "octopus_query"
 version = "0.1.0"
 authors = ["borislav nikolov <jack@sofialondonmoskva.com>"]
 edition = "2018"
 license-file = "LICENSE"
 description = "query engine for arrays of integers (scoring only idf at the moment), supports AND/OR/DisMax/Constant queries"
-repository = "https://github.com/jackdoe/octopus"
+repository = "https://github.com/jackdoe/octopus_query"
+readme = "README.md"
 
 [dependencies]
